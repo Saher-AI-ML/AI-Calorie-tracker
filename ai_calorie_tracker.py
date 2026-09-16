@@ -1,0 +1,115 @@
+from PIL import Image
+import base64
+import io
+import os
+from IPython.display import display, Markdown
+from openai import OpenAI
+
+from google.colab import userdata
+api = userdata.get('openaiapi')
+
+openai_client = OpenAI(api_key=api,
+                       base_url="https://openrouter.ai/api/v1")
+
+
+def print_markdown(text):
+    """Displays text as Markdown in Jupyter."""
+    display(Markdown(text))
+
+
+img_path = "/content/pizza_slice.png"
+img = Image.open(img_path)
+print(img.format)
+print(img.size)
+print(img.mode)
+display(img)
+
+image_to_analyze = img
+
+
+def encode_image_to_base64(image_path_or_pil):
+    if isinstance(image_path_or_pil, str):
+
+        if not os.path.exists(image_path_or_pil):
+            raise FileNotFoundError(f"File not found: {image_path_or_pil}")
+
+        with open(image_path_or_pil, "rb") as image_file:
+            return base64.b64encode(image_file.read()).decode("utf-8")
+
+    elif isinstance(image_path_or_pil, Image.Image):
+        buffer = io.BytesIO()
+        image_format = image_path_or_pil.format or "JPEG"
+        image_path_or_pil.save(buffer, format=image_format)
+        return base64.b64encode(buffer.getvalue()).decode("utf-8")
+    else:
+        raise ValueError(
+            "Invalid input. Expected a path to an image or a PIL Image.")
+
+
+def query_openai_vision(client, image, prompt, model="gpt-4o-mini", max_tokens=100):
+
+    image_base64 = encode_image_to_base64(image)
+    try:
+
+        messages = [
+            {
+                "role": "user", "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {
+                        "url": f"data:image/jpeg;base64, {image_base64}"
+                    }}
+                ]
+
+
+
+            }
+        ]
+
+        response = client.chat.completions.create(
+            model=model, messages=messages, max_tokens=max_tokens)
+        return response.choices[0].message.content
+    except Exception as e:
+        return f"Error calling api: {e}"
+
+
+structured_nutrition_prompt = """
+# Nutritional Analysis Task
+
+## Context
+You are a nutrition expert analyzing food images to provide accurate nutritional information.
+
+## Instructions
+Analyze the food item in the image and provide estimated nutritional information based on your knowledge.
+
+## Input
+- An image of a food item
+
+## Output
+Provide the following estimated nutritional information for a typical serving size or per 100g:
+- food_name (string)
+- serving_description (string, e.g., '1 slice', '100g', '1 cup')
+- calories (float)
+- fat_grams (float)
+- protein_grams (float)
+- confidence_level (string: 'High', 'Medium', or 'Low')
+
+**IMPORTANT:** Respond ONLY with a single JSON object containing these fields. Do not include any other text, explanations, or apologies. The JSON keys must match exactly: "food_name", "serving_description", "calories", "fat_grams", "protein_grams", "confidence_level". If you cannot estimate a value, use `null`.
+
+Example valid JSON response:
+{
+  "food_name": "Banana",
+  "serving_description": "1 medium banana (approx 118g)",
+  "calories": 105.0,
+  "fat_grams": 0.4,
+  "protein_grams": 1.3,
+  "confidence_level": "High"
+}
+"""
+
+print("🤖 Querying OpenAI Vision...")
+openai_description = query_openai_vision(
+    openai_client,
+    image_to_analyze,
+    structured_nutrition_prompt
+)
+print_markdown(openai_description)
